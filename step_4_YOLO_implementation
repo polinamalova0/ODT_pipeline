@@ -1,33 +1,32 @@
+% MATLAB R2023b
 clear all
 close all
-global segMap;global segMapPresentUpdated; global n_m; global n_s;
-global res3;global res4,global RII;global z;global tomoSequence;global qDataTemp2; global tempMap;
-global analysisData; global tomoSequence_asc; global positionList; global amountShift; global angleShift; global f_dx; global f_dy; global amountShiftDefocused; global maxAmountShift;
+global n_m; global res3;global res4,global RII;global tomoSequence;
+global analysisData; global tomoSequence_asc; global amountShift; global angleShift; global f_dx; global f_dy; global amountShiftDefocused; global maxAmountShift;
 
-spath='Z:\Data\ODT\000_Paula';
+spath='\path\to\files';
 path = spath;
 res3 = 0.235595625268319;
 res4 = 0.471191250536638;
 cd(spath)
-dateList=dir('2023*Detachment*');
+dateList=dir('directory');
 RII=0.19; %mL/g = fL/pg
 
-for dateNum=[2]
+for dateNum=1:length(dateList)
     n_m=1.337;
     cd(spath)
     cd(dateList(dateNum).name)
-    fprintf('Processing date: %s\n', dateList(dateNum).name); % Debug print
+    fprintf('Processing date: %s\n', dateList(dateNum).name); 
 
     batchList=dir('batch*');
-    for batchNum= [4]%[3,4,5,6] %1:length(batchList)
+    for batchNum= 1:length(batchList)
         try
             levelFlag=0;
             cd(spath)
             cd(dateList(dateNum).name)
             cd(batchList(batchNum).name)
-            fprintf('Processing batch: %s\n', batchList(batchNum).name); % Debug print
+            fprintf('Processing batch: %s\n', batchList(batchNum).name); 
            
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% field %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% retrieval %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -36,7 +35,7 @@ for dateNum=[2]
             bglist=dir('bg*_Tomog.mat');
             load(bglist(end).name);
             img=double(squeeze(tomogMap(:,:,16)));
-            %     img=double(imread(bglist(1).name,49));
+
             img=squeeze(img);
             ii=length(img);
             
@@ -58,12 +57,7 @@ for dateNum=[2]
             
             mi=f_dx(16);
             mj=f_dy(16);
-            %         mi=f_dx(49);
-            %         mj=f_dy(49);
-            %                 mi=mean(f_dx);
-            %                 mj=mean(f_dy);
             mi=round(mi-ii/2-1); mj=round(mj-ii/2-1);
-            %         mi=300;mj=311;
             
             c1mask = ~(mk_ellipse(r-20,yr-20,ZP,ZP));
             c3mask = circshift(c1mask,[mi mj]);
@@ -87,45 +81,24 @@ for dateNum=[2]
                 %                 pause()
             end
             %%
-            % for sampleNum=1
             sampleList=dir('sample*_Tomog.mat');
             fluoImgData=dir('sample*Fluo.mat');
-            sampleImgData=dir('sample*TimeLapse*.mat');
 
             cd('field_retrieval')
-            mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat.mat.mat');
-           
-            %mipSequence = [360, 200, 100, 50, 40, 30, 20, 16];
-            % mipSequence = 1:length(mipList);
-            %         for sampleNum=1:length(sampleList)
-            
+            mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat');
             tempDate=zeros(length(fluoImgData),1);
-            %cd('field_retrieval')
-             
-            %tomoList=dir('Field_sample*TimeLapse*YOLO_v4.mat');
-            %tomoList = dir('Tomogram_Field_sample*TimeLapse*.mat.mat.mat');
             segMapList=dir('segMapPresentUpdated*TimeLapse*_YOLO_v2.mat');
             sampleSequence = [16:1:60 65:5:length(sampleList)];
-            %tomoSequence = [length(tomoList):-5:65, 60:-1:16];
-            %positionList=zeros(length(tomoList),2);
             analysisData=cell(length(sampleSequence),1);
-            %analysisData = cell(length(tomoSequence),1);
-            
-            %tomoSequence=[length(tomoList):-1:16]; % analyzing from the end to the start with different tempos
-            tomoSequence=(length(sampleSequence):-1:1); % analyzing from the end to the start of tomoList
-            tomoSequence_asc = (1:1:length(sampleSequence)); %[16:1:60, 65:5:length(tomoList)]; % 
 
-            
-            for tomoNum =30:length(sampleSequence)
+            for tomoNum =1:length(sampleSequence)
                 sampleNum = sampleSequence(tomoNum);
                 try 
-                %for sampleNum = [360, 200, 100, 50, 40, 30, 20, 16]
-                %                    for sampleNum=1:20
                 cd(path)
                 cd(dateList(dateNum).name);
                 fprintf('Name of the sample: %s\n', sampleList(sampleNum).name);
                 cd(batchList(batchNum).name);
-                % path cDOT sample HT
+
                 load(sampleList(sampleNum).name);
                 retPhase=zeros(round(2*r)-4,round(2*r)-4,size(tomogMap,3),'single');
                 retAmplitude=zeros(round(2*r)-4,round(2*r)-4,size(tomogMap,3),'single');
@@ -138,7 +111,8 @@ for dateNum=[2]
                 
                 masks = cell(numel(maskList), 1);
                 p2Mask = zeros(414,414);
-                
+
+                %%%%%%%%%%%%%%%%%%%%% segmentation map implementation %%%%%%%%%%%%%%%%%%%%%%%
                 for i = 1:numel(maskList)
                     filename = maskList(i).name;
                     mask = readmatrix(filename);
@@ -287,7 +261,6 @@ for dateNum=[2]
 
             cd(spath);
             cd(dateList(dateNum).name);
-            %save(strcat('analysisData_phaseMass_v5_',batchList(batchNum).name),'analysisData');
         end
 
     end
