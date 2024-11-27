@@ -1,0 +1,320 @@
+# MATLAB R2023b
+clear all
+close all
+global segMapPresentUpdated; global n_m; global n_s;
+global res3;global res4,global RII;global tomoSequence;
+global analysisData; global tomoSequence_asc; global positionList;
+
+spath='\path\to\files';
+res3 = 0.235595625268319;
+res4 = 0.471191250536638;
+cd(spath)
+dateList=dir('directory');
+RII=0.19; %mL/g = fL/pg
+
+for dateNum=1:length(dateLIst)
+    n_m=1.337;
+    cd(spath)
+    cd(dateList(dateNum).name)
+    fprintf('Processing date: %s\n', dateList(dateNum).name); % Debug print
+
+    batchList=dir('batch*');
+    for batchNum=1:length(batchList)
+        try
+            levelFlag=0;
+            cd(spath)
+            cd(dateList(dateNum).name)
+            cd(batchList(batchNum).name)
+            fprintf('Processing batch: %s\n', batchList(batchNum).name); % Debug print
+            fluoImgData=dir('sample*Fluo.mat');
+            tempDate=zeros(length(fluoImgData),1);
+            sampleImgData=dir('sample*TimeLapse*.mat');
+            cd('field_retrieval')
+      
+            tomoList = dir('Tomogram_Field_sample*TimeLapse*.mat');
+            
+            tomoSequence_asc = [16:1:60, 65:5:length(tomoList)]; 
+            
+            for tomoNum=1:length(tomoSequence_asc) 
+                fprintf('Processing tomo: %s\n', tomoList(tomoSequence_asc(tomoNum)).name);
+                try
+                    cd(spath)
+                    cd(dateList(dateNum).name)
+                    cd(batchList(batchNum).name)
+
+                    %% 
+                    cd('field_retrieval')
+                    load(tomoList(tomoSequence_asc(tomoNum)).name);
+                    Reconimg=real(Reconimg);
+
+                    qData=[];
+                    fileNameData=[];
+                    sampleInd=1;
+
+                    for zz=1:size(Reconimg,3)
+                        temp=conv2(squeeze(Reconimg(:,:,zz)),fspecial('disk',0.7),'same');
+                        temp=temp(3:end-2,3:end-2);
+                        temp=padarray(temp,[2 2],n_m);
+                        Reconimg(:,:,zz)=temp;
+                    end
+                    n_s=n_m+0.04;
+
+                    %%
+                    %%%%%%%%%%%%%%%%%%%%%% segMap implementation %%%%%%%%%%%%%%%%%%%%%%%%
+                    mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat');
+                    probe_sequence = [16:1:60, 65:5:length(sampleImgData)];
+
+                    mipSequence = probe_sequence;
+                    fprintf('Name of the folder: %s\n', mipList(mipSequence(tomoNum)).name); % Debug print 
+                    cd(mipList(mipSequence(tomoNum)).name);
+
+                    maskList = dir('mask_*.csv');
+
+                    masks = cell(numel(maskList), 1); %  masks are descending by area size
+                    segMap2 = zeros(size(max(Reconimg,[],3)));
+                    border_mask_indexed = zeros(size(max(Reconimg,[],3)));
+                    overlap_mask = zeros(size(max(Reconimg,[],3)));
+                    segMap3 = zeros(size(max(Reconimg,[],3)));
+                    cell_size = 5000;
+
+                    for i = 1:numel(maskList)
+                        filename = maskList(i).name; 
+                        mask = readmatrix(filename);
+                        CC = bwconncomp(mask);
+                        stats_mask = regionprops(CC, 'PixelIdxList');
+                        % mask makeup: we remove everything that is smaller
+                        % than 1000 pixels
+                        for regionIdx = 1:numel(stats_mask)
+                            if numel(stats_mask(regionIdx).PixelIdxList) < 1000
+                                mask(stats_mask(regionIdx).PixelIdxList) = 0;
+                            end
+                         end 
+                        masks{i} = mask;
+                        segMap2(mask == 1) = i;
+                    end
+
+                    %fprintf('segMap2 numbers: %d\n', unique(segMap2)); % Debug print
+
+                    % Loop through each pair of masks and compute their
+                    % overlap (for further re-annotation)
+                    for i = 1:numel(masks)-1
+                        for j = i+1:numel(masks)
+                            pair_overlap = masks{i} & masks{j};
+                            if sum(sum(pair_overlap)) ~=0
+                                overlap_mask = overlap_mask | pair_overlap;
+                                if sum(pair_overlap(:)) > cell_size
+                                    %calculating the areas of the overlapped masks
+                                    area_i = sum(masks{i}(:));
+                                    area_j = sum(masks{j}(:));
+                                    % we reassign the area with index of
+                                    % smaller mask
+                                    if area_i > area_j
+                                        segMap2(pair_overlap) = j;
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    border_mask = imdilate(overlap_mask, strel('disk', 1)) - overlap_mask;
+                    border_mask_indexed(border_mask == 1) = segMap2(border_mask == 1); 
+
+                    CC = bwconncomp(overlap_mask);
+                    stats = regionprops(CC, 'PixelIdxList');
+
+                    % assigning overlapping areas an index
+                    for regionIdx = 1:numel(stats)
+                        if numel(stats(regionIdx).PixelIdxList) < cell_size
+                            regionMask = zeros(size(overlap_mask));
+                            regionMask(stats(regionIdx).PixelIdxList) = 1;
+                            borderMask_per_region = imdilate((regionMask ==1), strel('disk', 1)) - regionMask;
+                            borderCellTypes = zeros(size(overlap_mask));
+                            borderCellTypes(borderMask_per_region == 1) = segMap2(borderMask_per_region == 1);
+                            binEdges = 1:1:max(borderCellTypes(:))+1;  
+                            [N, edges, bin] = histcounts(borderCellTypes(borderCellTypes ~= 0), binEdges); 
+
+                            [maxCount, maxIndex] = max(N);
+                            prevalentType = edges(maxIndex);
+                            segMap2(regionMask == 1) = prevalentType;
+
+                        end
+                     end
+                     
+                    % in this part of the code manual adjustment of the number of pixels is required for maintaining proper segmentation  maps throughout the time
+                    segMap3 = segMap2;
+                    for cellNum=1:max(segMap2(:))
+                        if tomoSequence_asc(tomoNum)>30 %for different tomonum different filtering is required bc cells detach with time
+                            %   removing small and unwhole cells on the tomogram
+                            if sum(sum(segMap2==cellNum))<2500
+                                segMap3(segMap2==cellNum)=0;
+                            end
+                        end
+                        if tomoSequence_asc(tomoNum)<31 
+                            if sum(sum(segMap2==cellNum))<cell_size
+                                segMap3(segMap2==cellNum)=0;
+                            end
+%                             if sum(sum(segMap2==cellNum))> 18000
+%                                 segMap3(segMap2==cellNum)=0;
+%                             end
+
+                        end
+                        %%
+
+                        
+                        [tempX,tempY,~]=ind2sub(size(segMap2),find(segMap2==cellNum));
+                        if (sum(tempX==1)+sum(tempX==size(segMap2,1))+sum(tempY==1)+sum(tempY==size(segMap2,2)))>50
+                            segMap3(segMap2==cellNum)=0;
+                        end
+
+                        %sometimes ai recognizes the cells on the
+                        %border but with a little bit of a shift from
+                        %the actual image border therefore size(segMap2-10,:)
+                        if (sum(tempX==10)+sum(tempX==size(segMap2-10,1))+sum(tempY==10)+sum(tempY==size(segMap2-10,2)))>50
+                            segMap3(segMap2==cellNum)=0;
+                        end 
+
+                        % cleanup again
+                        CC = bwconncomp(segMap3 == cellNum);
+                        stats2 = regionprops(CC, 'PixelIdxList');
+                        for regionIdx = 1:numel(stats2)
+                            if numel(stats2(regionIdx).PixelIdxList) < 200
+                                segMap3(stats2(regionIdx).PixelIdxList) = 0;
+
+                            end
+                        end
+
+
+                    end
+
+                    %re-indexing the values of cellNum after deleting
+                    %several cells
+                    unique_values = unique(segMap3);
+                    %fprintf('unique values: %d\n', length(unique_values));
+                    new_values = 0:(numel(unique_values)-1);
+                    for i = 1:numel(unique_values)
+                        segMap3(segMap2 == unique_values(i)) = new_values(i);
+                    end
+
+                    segMap2 = segMap3; 
+
+                    unique_values_2 = unique(segMap2);
+                    %fprintf('unique values_2: %d\n', length(unique_values_2));
+                    cd('..'); 
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+                    % tomogram alignment to get FOV change
+                    % technically we can do it even before creating cellMap
+                    if tomoNum==1
+                        tempImg=max(Reconimg,[],3);
+                        positionList(tomoSequence_asc(tomoNum),:)=[0 0];
+                        fprintf('positionList created!! '); % Debug print
+                        segMapPast=segMap2;
+                        segMapPresentUpdated = segMap2;
+                        indListInitial = 1:max(segMapPast(:));
+
+                    else
+                        corrVal=xcorr2(gradient(tempImg),gradient(max(Reconimg,[],3)));
+                        [xxx yyy]=find(abs(corrVal)== max(max(abs(corrVal))));
+                        xxx=xxx-size(Reconimg,1);
+                        yyy=yyy-size(Reconimg,2);
+                        positionList(tomoSequence_asc(tomoNum),:)=positionList(tomoSequence_asc(tomoNum-1),:)+[xxx yyy];
+                        tempImg=max(Reconimg,[],3);
+                        segMapPresent=segMap2;
+
+                        segMapPresentUpdated = zeros(size(segMapPast));
+
+                        indList=zeros(size(indListInitial));
+                        %Adjusting segMaps according to FOV change
+                        segMapPast2=circshift(segMapPast,positionList(tomoSequence_asc(tomoNum-1),:));
+                        segMapPresent2=circshift(segMapPresent,positionList(tomoSequence_asc(tomoNum),:));
+
+                        indList2 = unique(segMapPresent);
+                        nonZeroIndices = indList2(indList2 ~= 0);
+
+                        % cleaning out the mask from other cells  
+                        for idx = 1:length(nonZeroIndices)
+                            cellId = nonZeroIndices(idx);
+                            cellMask = (segMapPresent2 == cellId);
+                            num_non_zero = sum(segMapPast2(cellMask) ~= 0);
+                            percentage_non_zero = (num_non_zero / sum(cellMask(:))) ;
+                            if percentage_non_zero < 0.4
+                                segMapPresent(segMapPresent == cellId) = 0;
+                            end
+                        end
+                        segMapPresent_backup = segMapPresent;
+
+                        %re-annotation of the segMapPresent
+                        segMapPresent_copy=  zeros(size(segMapPresent));
+                        unique_values_20 = unique(segMapPresent);
+                        unique_values_2 = unique_values_20(unique_values_20 ~= 0);
+                        for i = 1:length(unique_values_2)
+                            value = unique_values_2(i);
+                            segMapPresent_copy(segMapPresent == value) = indListInitial(i);
+                        end
+                        segMapPresent = segMapPresent_copy;
+
+                        segMapPresent2=circshift(segMapPresent,positionList(tomoSequence_asc(tomoNum),:));
+
+                        for sampleNum=1:max(indListInitial)
+                            segMapPresentCell=segMapPresent2.*(segMapPast2==sampleNum);
+                            indList(sampleNum)=[mode(segMapPresentCell(segMapPast2==sampleNum))]; %writing in the cellNum row of indList the most frequently occuring number of the cells
+                        end
+                        clear segMapPresent_copy cellMask;
+
+                        indList(find(indList==0))=NaN;
+                        validIndices = ~isnan(indList);
+                        indListNoNaN = indList(validIndices);
+
+                        segMapFakePresent = zeros(size(segMapPast));
+                        %indList_modified = indList;
+                        positionDifference = positionList(tomoSequence_asc(tomoNum), :) - positionList(tomoSequence_asc(tomoNum-1), :);
+
+                        for sampleNum=1:length(indList) 
+                            cellNum = indList(sampleNum);
+                            try
+                            if sum(isnan(indList)) ==1
+                                if isnan(cellNum)
+                                     missingCells = setdiff(indListInitial,indList(~isnan(indList))); 
+                                     missingCellNum = missingCells(1);
+                                     cellMask = (segMapPast == sampleNum);
+                                     cellMask_shifted = circshift(cellMask,-positionDifference);
+                                     segMapFakePresent(cellMask_shifted) = missingCellNum;
+                                     uniqueFakeCells_0 = unique(segMapFakePresent);
+                                     uniqueFakeCells = uniqueFakeCells_0(uniqueFakeCells_0 ~= 0);
+
+                                     for i = 1:length(uniqueFakeCells)
+                                         cellIdx = uniqueFakeCells(i);
+                                         segMapPresent(segMapFakePresent == cellIdx) = cellIdx;
+                                     end
+
+
+                                     indList(isnan(indList)) = missingCellNum;
+                                     cellNum = missingCellNum;
+                                end
+                            elseif sum(isnan(indList))>1
+                                fprintf('more than one NaN!!\n') %Debug pring
+                            end
+                            segMapPresentUpdated=segMapPresentUpdated+(segMapPresent == cellNum)*sampleNum;
+                            catch e
+                            end 
+                        end
+                        segMapPast = segMapPresentUpdated;
+                        clear segMapFakePresent cellMask;
+                    end
+                    figure(1);
+                    imagesc(segMapPresentUpdated,[0 length(indListInitial)]);
+                    axis image;
+                    title('segMapPresentUpdated');
+                    xlabel(num2str(tomoNum));
+                    fileName=strcat('segMapPresentUpdated_',tomoList((tomoSequence_asc(tomoNum))).name,'_YOLO_v2');
+                    %print('-dpng',strcat(fileName,'.png'))
+                    %save(strcat(fileName,'.mat'),'segMapPresentUpdated', 'segMapPast', 'indListInitial', 'positionList' );
+
+                    %clf
+                catch e
+                end
+            end 
+        end
+    end
+end
+          
