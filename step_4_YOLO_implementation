@@ -1,0 +1,294 @@
+clear all
+close all
+global segMap;global segMapPresentUpdated; global n_m; global n_s;
+global res3;global res4,global RII;global z;global tomoSequence;global qDataTemp2; global tempMap;
+global analysisData; global tomoSequence_asc; global positionList; global amountShift; global angleShift; global f_dx; global f_dy; global amountShiftDefocused; global maxAmountShift;
+
+spath='Z:\Data\ODT\000_Paula';
+path = spath;
+res3 = 0.235595625268319;
+res4 = 0.471191250536638;
+cd(spath)
+dateList=dir('2023*Detachment*');
+RII=0.19; %mL/g = fL/pg
+
+for dateNum=[2]
+    n_m=1.337;
+    cd(spath)
+    cd(dateList(dateNum).name)
+    fprintf('Processing date: %s\n', dateList(dateNum).name); % Debug print
+
+    batchList=dir('batch*');
+    for batchNum= [4]%[3,4,5,6] %1:length(batchList)
+        try
+            levelFlag=0;
+            cd(spath)
+            cd(dateList(dateNum).name)
+            cd(batchList(batchNum).name)
+            fprintf('Processing batch: %s\n', batchList(batchNum).name); % Debug print
+           
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% field %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% retrieval %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+            f_dx =[];
+            f_dy= [];
+            bglist=dir('bg*_Tomog.mat');
+            load(bglist(end).name);
+            img=double(squeeze(tomogMap(:,:,16)));
+            %     img=double(imread(bglist(1).name,49));
+            img=squeeze(img);
+            ii=length(img);
+            
+            ZP=ii;
+            r=round(ZP*res*NA/lambda)+20;
+            yr = r;
+            
+            for bgNum=1:size(tomogMap,3)
+                img=double(squeeze(tomogMap(:,:,bgNum)));
+                %                 subplot(121),  imagesc(((img))),axis image,colormap('jet')
+                [xSize ySize]=size(img);
+                Fimg = fftshift(fft2(img))/(xSize*ySize); %FFT
+                %             subplot(122),imagesc(log10(abs(Fimg))),axis image
+                [f_x,f_y]=find(Fimg==max(max(Fimg(:, round(ii*0.01):round(ii*0.49) ))));
+                f_dx=[f_dx;f_x];
+                f_dy=[f_dy;f_y];
+                %             pause()
+            end
+            
+            mi=f_dx(16);
+            mj=f_dy(16);
+            %         mi=f_dx(49);
+            %         mj=f_dy(49);
+            %                 mi=mean(f_dx);
+            %                 mj=mean(f_dy);
+            mi=round(mi-ii/2-1); mj=round(mj-ii/2-1);
+            %         mi=300;mj=311;
+            
+            c1mask = ~(mk_ellipse(r-20,yr-20,ZP,ZP));
+            c3mask = circshift(c1mask,[mi mj]);
+            
+            Fbg=zeros(round(2*r),round(2*r),size(tomogMap,3),'single');
+            tempImg=zeros(ZP,ZP);
+            for bgNum=1:size(tomogMap,3)
+                img=double(squeeze(tomogMap(:,:,bgNum)));
+                %                 subplot(121),  imagesc(((img))),axis image,colormap('jet')
+                [xSize ySize]=size(img);
+                Fimg = fftshift(fft2(img))/(xSize*ySize); %FFT
+                Fimg = Fimg.*c3mask;
+                
+                Fimg = circshift(Fimg,-[round(mi) round(mj)]);
+                %                 subplot(122),  imagesc(log10(abs(Fimg))),axis image
+                Fimg = Fimg(ii/2-r+1:ii/2+r,ii/2-r+1:ii/2+r);
+                sizeFimg=length(Fimg);
+                Fimg = ifft2(ifftshift(Fimg))*(sizeFimg^2);
+                Fbg(:,:,bgNum)=Fimg;
+                %     title(num2str(bgNum))
+                %                 pause()
+            end
+            %%
+            % for sampleNum=1
+            sampleList=dir('sample*_Tomog.mat');
+            fluoImgData=dir('sample*Fluo.mat');
+            sampleImgData=dir('sample*TimeLapse*.mat');
+
+            cd('field_retrieval')
+            mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat.mat.mat');
+           
+            %mipSequence = [360, 200, 100, 50, 40, 30, 20, 16];
+            % mipSequence = 1:length(mipList);
+            %         for sampleNum=1:length(sampleList)
+            
+            tempDate=zeros(length(fluoImgData),1);
+            %cd('field_retrieval')
+             
+            %tomoList=dir('Field_sample*TimeLapse*YOLO_v4.mat');
+            %tomoList = dir('Tomogram_Field_sample*TimeLapse*.mat.mat.mat');
+            segMapList=dir('segMapPresentUpdated*TimeLapse*_YOLO_v2.mat');
+            sampleSequence = [16:1:60 65:5:length(sampleList)];
+            %tomoSequence = [length(tomoList):-5:65, 60:-1:16];
+            %positionList=zeros(length(tomoList),2);
+            analysisData=cell(length(sampleSequence),1);
+            %analysisData = cell(length(tomoSequence),1);
+            
+            %tomoSequence=[length(tomoList):-1:16]; % analyzing from the end to the start with different tempos
+            tomoSequence=(length(sampleSequence):-1:1); % analyzing from the end to the start of tomoList
+            tomoSequence_asc = (1:1:length(sampleSequence)); %[16:1:60, 65:5:length(tomoList)]; % 
+
+            
+            for tomoNum =30:length(sampleSequence)
+                sampleNum = sampleSequence(tomoNum);
+                try 
+                %for sampleNum = [360, 200, 100, 50, 40, 30, 20, 16]
+                %                    for sampleNum=1:20
+                cd(path)
+                cd(dateList(dateNum).name);
+                fprintf('Name of the sample: %s\n', sampleList(sampleNum).name);
+                cd(batchList(batchNum).name);
+                % path cDOT sample HT
+                load(sampleList(sampleNum).name);
+                retPhase=zeros(round(2*r)-4,round(2*r)-4,size(tomogMap,3),'single');
+                retAmplitude=zeros(round(2*r)-4,round(2*r)-4,size(tomogMap,3),'single');
+                
+                fprintf('Name of the folder: %s\n', mipList(sampleNum).name); % Debug print
+                cd('field_retrieval')
+                cd(mipList(sampleNum).name);
+                
+                maskList = dir('mask_*.csv');
+                
+                masks = cell(numel(maskList), 1);
+                p2Mask = zeros(414,414);
+                
+                for i = 1:numel(maskList)
+                    filename = maskList(i).name;
+                    mask = readmatrix(filename);
+                    [xxx_,yyy_] = meshgrid(1:428, 1:428);
+                    [xxq,yyq] = meshgrid(linspace(1,428, 414), linspace(1,428, 414));
+                    mask=interp2(xxx_,yyy_,mask,xxq,yyq)> 0.5;
+                    masks{i} = mask;
+                    p2Mask(mask == 1) = 1;
+                end
+                
+                testSeq=[16 33 38 42 47];
+                retPhase2=zeros(round(2*r)-4,round(2*r)-4,5,'single');
+                for kkk=1:length(testSeq)
+                    try
+                    iter=testSeq(kkk);
+                    img=(double(squeeze(tomogMap(:,:,iter))));
+                    Fimg = fftshift(fft2(img))/(ii^2); %FFT
+                    
+                    Fimg = Fimg.*c3mask;
+                    Fimg = circshift(Fimg,-[round(mi) round(mj)]);
+                    
+                    Fimg = Fimg(ii/2-r+1:ii/2+r,ii/2-r+1:ii/2+r);
+                    sizeFimg=length(Fimg);
+                    Fimg = (ifft2(ifftshift(Fimg))*(sizeFimg^2));
+                    
+                    Fimg=Fimg./squeeze(Fbg(:,:,iter));
+                    Fimg=Fimg(3:end-2,3:end-2);
+                    FFimg=(fftshift(fft2(Fimg)));
+                    [tempX,tempY]=find(abs(FFimg)==max(max(abs(FFimg))));
+                    
+                    tempX=tempX-size(FFimg,1)/2;
+                    tempY=tempY-size(FFimg,2)/2;
+                    Fimg=ifft2(ifftshift(circshift(FFimg,-[tempX-1 tempY-1])));
+                    p=((unwrap2(double(angle(Fimg)))));
+                    [p,coeffVal,~]=phaseCompensation(p,1);
+                    
+                    p3Mask=~imdilate(p2Mask,strel('disk',10)); 
+                    %%
+                    [p,coefficients]=phaseCompensation(p,2,p3Mask);
+                    retPhase2(:,:,kkk)=p;
+                    %                     pause()
+                    catch e
+                end
+                end
+                
+                goldenPhase=retPhase2(:,:,1);
+                testList=zeros(length(testSeq),2);
+                for kkk=2:length(testSeq)
+                    xcorrMap=xcorr2(gradient(retPhase2(:,:,kkk)),gradient(goldenPhase));
+                    [xShift,yShift]=find(xcorrMap==max(max(xcorrMap)));
+                    xShift=xShift-size(retPhase2,1);
+                    yShift=yShift-size(retPhase2,2);
+                    testList(kkk,:)=[xShift,yShift];
+                end
+                amountShiftDefocused=max(abs(testList(:)));
+                angleShift=atan2(f_dx-mean(f_dx),f_dy-mean(f_dy))*180/pi;
+                amountShift=sqrt((f_dy-mean(f_dy)).^2+(f_dx-mean(f_dx)).^2);
+                maxAmountShift=max(amountShift);
+                amountShift=amountShift*amountShiftDefocused./max(amountShift);
+                if (amountShiftDefocused <1)
+                    k_x = (f_dx-mean(f_dx))./(length(tomogMap)* res);
+                    k_y = (f_dy-mean(f_dy))./(length(tomogMap)* res);
+                    k_z =real(sqrt((n_m/lambda)^2-(k_x).^2-(k_y).^2));
+                    theta = atan2(k_x,k_z);
+                    cell_h = 22.75;  % 428 vs 414 coefficient!
+                    amountShift = abs(cell_h*tan(theta));
+                end
+
+                for iter=1:size(tomogMap,3)
+                    try
+                    %                         if mod(sampleNum,2)==1
+                    img=(double(squeeze(tomogMap(:,:,iter))));
+                    %                         else
+                    %                             img=(double(squeeze(tomogMap(:,:,size(Fbg,3)-iter+1))));
+                    %                         end
+                    %                     subplot(231),  imagesc(((img))),axis image
+                    Fimg = fftshift(fft2(img))/(ii^2); %FFT
+                    %                     subplot(232),  imagesc(log10(abs(Fimg))),axis image
+                    %                     subplot(2,3,[4 6]),plot(iter,std(img(:)),'or'),hold on
+                
+                    Fimg = Fimg.*c3mask;
+                    Fimg = circshift(Fimg,-[round(mi) round(mj)]);
+                
+                    Fimg = Fimg(ii/2-r+1:ii/2+r,ii/2-r+1:ii/2+r);
+                    sizeFimg=length(Fimg);
+                    Fimg = (ifft2(ifftshift(Fimg))*(sizeFimg^2));
+                
+                    Fimg=Fimg./squeeze(Fbg(:,:,iter));
+                    Fimg=Fimg(3:end-2,3:end-2);
+                    FFimg=(fftshift(fft2(Fimg)));
+                    [tempX,tempY]=find(abs(FFimg)==max(max(abs(FFimg))));
+                
+                    tempX=tempX-size(FFimg,1)/2;
+                    tempY=tempY-size(FFimg,2)/2;
+                    Fimg=ifft2(ifftshift(circshift(FFimg,-[tempX-1 tempY-1])));
+                
+                    retAmplitude(:,:,iter)=abs(Fimg);
+                
+                    p=((unwrap2(double(angle(Fimg)))));
+                    [p,coeffVal,~]=phaseCompensation(p,1);
+                    %                     subplot(233),imagesc(p),axis image
+                    tempThresh=p-imtophat(imgaussfilt(p,15),strel('disk',150));
+                    tempThresh=mean(tempThresh(:))+0.75;
+                    %%
+                    p5Mask=(p>tempThresh(1));
+                    p5Mask=bwareaopen(p5Mask,100); 
+                    p5Mask=~imdilate(p5Mask,strel('disk',10));% Mask for the new method (0.75, 10)
+                    %
+                    p3Mask=~imdilate(p2Mask,strel('disk',10));
+                    if (iter ==16)||(amountShift(iter)<1)
+                    else
+                        p3Mask=~imdilate(~p3Mask,strel('line',amountShift(iter),angleShift(iter))); 
+                        p3Mask=~imdilate(~p3Mask,strel('disk',5));
+                    end
+                    p3Mask=~imdilate(~p3Mask,strel('disk',1));
+                    p3Mask=padarray(double(p3Mask),[50 50],100);
+                    p3Mask=circshift(p3Mask,round(-[f_dx(iter)-mean(f_dx),f_dy(iter)-mean(f_dy)]*amountShiftDefocused/maxAmountShift));
+                    p3Mask=p3Mask(end/2-size(p5Mask)/2+1:end/2+size(p5Mask)/2,end/2-size(p5Mask)/2+1:end/2+size(p5Mask)/2);
+                    p3Mask(p3Mask==100)=p5Mask(p3Mask==100);
+                    p3Mask=(p3Mask.*p5Mask);
+                     %%
+                    [p,coefficients]=phaseCompensation(p,2,p3Mask);
+                    retPhase(:,:,iter)=p;
+                    catch e
+                    end
+                    %                     pause()
+                end
+                figure(1),
+                for kk=1:6
+                    subplot(3,3,kk),imagesc(squeeze(retPhase(:,:,round(size(tomogMap,3)/6*kk))),[-3 3]),axis image,axis off
+                end
+                subplot(3,3,[7 9]),imagesc(squeeze(retPhase(:,end/2,:)),[-3 3])
+                colormap('jet')
+                fileName=strcat('Field_',sampleList(sampleNum).name,'_YOLO_v4');
+                
+                cd(path)
+                cd(dateList(dateNum).name);
+                cd(batchList(batchNum).name);
+                cd('field_retrieval');
+
+
+                %save(strcat(fileName,'.mat'),'retAmplitude','retPhase','xSize','f_dx','f_dy','NA','lambda','res','ZP','dateTimeVal');
+                %print('-dpng',strcat(fileName,'.png'))
+
+            end
+
+            cd(spath);
+            cd(dateList(dateNum).name);
+            %save(strcat('analysisData_phaseMass_v5_',batchList(batchNum).name),'analysisData');
+        end
+
+    end
+end
