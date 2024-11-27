@@ -87,7 +87,6 @@ for dateNum=1:length(dateList)
             cd('field_retrieval')
             mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat');
             tempDate=zeros(length(fluoImgData),1);
-            segMapList=dir('segMapPresentUpdated*TimeLapse*_YOLO_v2.mat');
             sampleSequence = [16:1:60 65:5:length(sampleList)];
             analysisData=cell(length(sampleSequence),1);
 
