@@ -1,8 +1,7 @@
 % MATLAB R2023b
 clear all
 close all
-global n_m; global res3;global res4,global RII;global tomoSequence;
-global analysisData; global tomoSequence_asc; global amountShift; global angleShift; global f_dx; global f_dy; global amountShiftDefocused; global maxAmountShift;
+global n_m; global res3;global res4,global RII;global tomoSequence; global tomoSequence_asc; global amountShift; global angleShift; global f_dx; global f_dy; global amountShiftDefocused; global maxAmountShift;
 
 spath='\path\to\files';
 path = spath;
@@ -88,7 +87,6 @@ for dateNum=1:length(dateList)
             mipList = dir('masks_Tomogram_Field_sample*TimeLapse*.mat');
             tempDate=zeros(length(fluoImgData),1);
             sampleSequence = [16:1:60 65:5:length(sampleList)];
-            analysisData=cell(length(sampleSequence),1);
 
             for tomoNum =1:length(sampleSequence)
                 sampleNum = sampleSequence(tomoNum);
