@@ -1,0 +1,112 @@
+# PyCharm 2021.3
+
+import cv2
+from ultralytics import YOLO
+import torch
+import os
+import numpy as np
+import h5py
+import matplotlib.pyplot as plt
+import glob
+##################################
+
+def from_mat_to_numpy(array):
+    numpy_array = np.array(array)
+    transposed_array = np.transpose(numpy_array, (1, 2, 0))
+    return transposed_array
+
+def normalization_visualisation(np_array, vmin, vmax):
+    normalized_np_array = np.clip((np_array - vmin) / (vmax - vmin), 0, 1)
+    # Applying colormap
+    colormap = plt.get_cmap('viridis')
+    rgba_np_array = (colormap(normalized_np_array) * 255).astype(np.uint8)
+    # Converting to BGR
+    rgb_np_array = cv2.cvtColor(rgba_np_array, cv2.COLOR_RGBA2BGR)
+    flipped_array = np.flip(rgb_np_array, axis=0)
+    rotated_array = cv2.rotate(flipped_array, cv2.ROTATE_90_CLOCKWISE)
+    return rotated_array
+
+def calculate_area(mask_):
+    return np.sum(mask_)
+
+def count_values(mask):
+    unique, counts = np.unique(mask, return_counts=True)
+    return dict(zip(unique, counts))
+##################################
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'Using device: {device}')
+
+model = YOLO('yolov8s-seg.pt').to(device)
+if __name__ == '__main__':
+   results = model.train(data=r'Z:\path\YOLOv8\labelme_json_dir\YOLODataset\dataset.yaml', epochs=100,  imgsz=(428,428), device = device, overlap_mask=False, verbose=True, workers = 1)
+
+
+spath = r'Z:/Data/ODT/000_Paula'
+model_path = r'Z:\path\YOLOv8\labelme_json_dir\YOLODataset\train\weights\last.pt'
+
+dateList = glob.glob(os.path.join(spath, '2023*Detachment*'))
+model = YOLO(model_path)
+dateList_selected = [dateList[1]]
+print('dateList_selected: ', dateList_selected)
+# Process each batch
+for dateNum in dateList_selected:
+    os.chdir(dateNum)
+    batchList = glob.glob(os.path.join(dateNum, 'batch*'))
+    selected_batchList = [batchList[4]]
+    print(selected_batchList)
+    for batch in selected_batchList:
+        print('batch: ', batch)
+        field_retrieval_folder = os.path.join(batch, 'field_retrieval')
+        os.chdir(field_retrieval_folder)
+
+        tomoList = glob.glob(os.path.join(field_retrieval_folder, 'Tomogram_Field_*.mat')) 
+        tomoNames = glob.glob('Tomogram_Field_*.mat')
+
+        tomoList_selected = tomoList
+        print('tomoList_selected: ', tomoList_selected)
+        print('tomoNames:', tomoNames)
+        for index,tomo in enumerate(tomoList_selected):
+            print('tomo: ', tomo)
+            with h5py.File(tomo, 'r') as mat_data:
+                print('output folder path: ', os.path.join(field_retrieval_folder, tomoNames[index]))
+                output_directory_path = os.path.join(field_retrieval_folder, f'masks_{tomoNames[index]}')
+                # os.makedirs(output_directory_path)
+
+                reconimg_array = mat_data['Reconimg']
+                reconimg = from_mat_to_numpy(reconimg_array)
+                mip = np.max(reconimg, axis=2)  # mip - maximal intensity projection
+                max_index_2d = np.unravel_index(np.argmax(mip, axis=None), mip.shape)
+
+
+                # the range of the values for the input image (mip)
+                vmin = 1.335
+                vmax = 1.395
+
+                img_orig = mip # [:,:,z_before]
+                # Normalizing the values
+                img = normalization_visualisation(img_orig, vmin, vmax)
+                print('opened, predicting...')
+
+                # Using the model
+                results = model(img, agnostic_nms=True, iou=0.5, save=True)
+
+                if (results[0].masks is not None):
+                    areas = []
+                    for j, mask in enumerate(results[0].masks):
+                        h, w, c = results[0].orig_img.shape
+                        mask_raw = mask.cpu().data.numpy().transpose(1, 2, 0)
+                        mask_raw = cv2.resize(mask_raw, (w, h)).astype(int)
+                        areas.append((j, calculate_area(mask_raw)))
+
+
+                    # Sort by area, greatest first
+                    areas.sort(key=lambda x: x[1], reverse=True)
+                    # Save masks to CSV files in sorted order (descending)
+                    for i, (mask_index, _) in enumerate(areas):
+                        mask_to_save = results[0].masks[mask_index].data.numpy().transpose(1, 2, 0)
+                        mask_to_save = cv2.resize(mask_to_save, (w, h)).astype(int)
+                        mask_to_save = mask_to_save.astype(bool)
+                        print(mask_to_save.shape)
+                        # np.savetxt( output_directory_path + '/' + f'mask_{i}.csv', mask_to_save, delimiter=',')
+                        # print(f'mask_{i} is saved ')
