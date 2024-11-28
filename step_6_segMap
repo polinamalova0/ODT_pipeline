@@ -425,4 +425,125 @@ for dateNum=1:length(dateLIst)
         end
     end
 end
+
+
+
+function qDataTemp=quantification3D(Reconimg,level,cellNum)
+global segMapPresentUpdated;global res3;global res4;global RII;global n_m; global p3Mask; global phaseMap; global lambda
+qDataTemp=zeros(1,15);
+cellMap=((Reconimg.*repmat(segMapPresentUpdated==cellNum,[1 1 size(Reconimg,3)]))>level);
+cellMap=imfill(cellMap,'holes');
+cellMap=bwareaopen(cellMap,1000);
+disp(sum(cellMap(:)));
+
+
+cellMask = (segMapPresentUpdated == cellNum);
+
+cellMask_changed = imresize(cellMask, [414,414]);
+[xx_mask_orig, yy_mask_orig] = meshgrid(1:428, 1:428); 
+[xx_mask_target, yy_mask_target] = meshgrid(linspace(1,428,414), linspace(1,428,414)); 
+cellMask_changed = interp2(xx_mask_orig, yy_mask_orig, double(cellMask), xx_mask_target, yy_mask_target);
+cellMask_changed = cellMask_changed > 0.5;
+%%%%%%%%%%%%%
+cellMask_changed=imdilate(cellMask_changed,strel('disk',2)); 
+
+%%%%%%%%%%%%%                   
+phaseCellMap = phaseMap(cellMask_changed);
+
+
+
+% [xxx yyy zzz]=meshgrid(-15:15,-15:15,-15:15);
+% se=real(single((xxx.^2/kk.^2+yyy.^2/kk.^2+zzz.^2/(kk/(res3/res4)+1).^2)<1^2));
+% cellMap=imerode(cellMap,se);
+
+% [tempX tempY tempZ]=ind2sub(size(cellMap),find(cellMap));
+centroid=regionprops((cellMap),'Centroid');
+centroid=centroid(1); %Error (<61): Index exceeds the number of array elements. Index must not exceed 0. (only appears when sum(cellMap(:)) = 0)
+centroid=(centroid.Centroid);
+
+Reconimg3 = Reconimg - n_m;
+cellMap_cylinder = Reconimg3.*repmat(segMapPresentUpdated==cellNum,[1 1 size(Reconimg3,3)]) ;
+%maxProj=max(Reconimg,[],3);
+%cellMap_bg = maxProj(p3Mask == 1); %max projection
+
+Reconimg2=Reconimg.*cellMap;
+%%
+p2 = isosurface(cellMap,0.8);
+v = p2.vertices;
+v(:,1:2)=v(:,1:2)*res3;
+v(:,3)=v(:,3)*res4;
+f = p2.faces;
+a = v(f(:,2),:) - v(f(:,1),:);
+b = v(f(:,3),:) - v(f(:,1),:);
+c = cross(a,b,2);
+area = 0.5*sum(sqrt(sum(c.^2,2)));
+dm_cylinder =  sum(sum(sum(cellMap_cylinder))) * (res3^2 * res4) / RII;
+dm_ph =  lambda * sum(phaseCellMap) * (res3^2) / (2*pi*RII);
+%% Quantification #1: 3D
+% %1: 3D Volume
+% %2: 3D Dry mass
+% %3: 3D RI
+% %4: Surface Area
+% %5: 2D section RI
+% %6: 2D max RI
+
+qDataTemp(1)=sum(sum(sum(cellMap))).*(res3.^2*res4);%volume
+qDataTemp(2)=sum(sum(sum((Reconimg-n_m).*cellMap))).*(res3.^2*res4)/RII; % mass
+qDataTemp(3)=mean(Reconimg2(cellMap));
+qDataTemp(4)=area;
+qDataTemp(5)=sum(sum(Reconimg2(:,:,end/2).*(Reconimg2(:,:,end/2)>0)))./sum(sum(Reconimg2(:,:,end/2)>0));
+qDataTemp(6)=sum(sum(max(Reconimg2,[],3).*(max(Reconimg2,[],3)>0)))./sum(sum(max(Reconimg2,[],3)>0));
+qDataTemp(7:9)=centroid;
+qDataTemp(14) = dm_cylinder;
+qDataTemp(15) = dm_ph;
+
+dryMass = qDataTemp(2); % Store the calculated dry mass
+
+fprintf('calculatedDryMass: %d\n', dryMass);
+fprintf('(calculated Dry Mass - DryMass_phase): %d\n', dryMass-dm_ph);
+end
+
+
+
+%function [level, iter] = levelCalculator_adjusted(Reconimg, cellNum, ind, level2)
+function [level, iter] = levelCalculator_adjusted(Reconimg, cellNum, ind, level2, tomoNum)
+global segMapPresentUpdated; global res3; global res4; global RII; global n_m; global analysisData; global qDataTemp2; global tomoSequence; 
+iter = 1;
+level = level2;
+
+% disp(['The type of analysisData is: ', class(analysisData)]);
+
+%%
+initialDryMass = analysisData{tomoSequence(1)}(ind,2); 
+%initialDryMass = analysisData{tomoSequence(tomoNum-1)}(ind,2); 
+%%
+
+fprintf('givenDryMass: %d\n', initialDryMass);
+% comparison with initial dry mass (from 61th tomoNum)
+while ((abs(initialDryMass - qDataTemp2(2)) / initialDryMass) > 0.05) && (iter < 15) && (level > n_m) && (level <= level2)
+    if iter == 1
+        level = level - (initialDryMass - qDataTemp2(2)) / abs((initialDryMass - qDataTemp2(2)) * 800); %600); %300);
+    else
+        level = level - (initialDryMass - qDataTemp2(2)) / 60000; %20000;
+    end
+
+
+    cellMap = ((Reconimg .* repmat(segMapPresentUpdated == cellNum, [1 1 size(Reconimg, 3)])) > level);
+    cellMap = imfill(cellMap, 'holes');
+    cellMap = bwareaopen(cellMap, 1000);
+
+    % Recalculate dry mass
+    qDataTemp2(2) = sum(sum(sum((Reconimg - n_m) .* cellMap))) * (res3^2 * res4) / RII;
+
+
+    fprintf('recalculatedDryMass: %d\n',  qDataTemp2(2));
+
+    iter = iter + 1;
+end
+end
+
+
+
+
+
           
