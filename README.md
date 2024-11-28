@@ -1,6 +1,6 @@
 # ODT_pipeline
 The pipeline consists of 7 steps:
-1) Hologram aquisition
+1) Tomogram aquisition (experiment)
 2) Field retrieval
 3) Tomogram reconstruction
 4) Cell Mask aqusition
