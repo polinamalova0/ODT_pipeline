@@ -32,7 +32,7 @@ for dateNum=1:length(dateLIst)
             cd('field_retrieval')
       
             tomoList = dir('Tomogram_Field_sample*TimeLapse*.mat');
-            
+            tomoSequence=[length(tomoList):-1:16];
             tomoSequence_asc = [16:1:60, 65:5:length(tomoList)]; 
             
             for tomoNum=1:length(tomoSequence_asc) 
@@ -314,6 +314,114 @@ for dateNum=1:length(dateLIst)
                 catch e
                 end
             end 
+
+        for tomoNum=1:length(tomoSequence) 
+               fprintf('Processing tomo: %s\n', tomoList(tomoSequence(tomoNum)).name);
+               sampleSequence = [16:1:60 65:5:length(sampleImgData)];
+               % segMap_indeces = length(sampleSequence):-1:1;
+               fprintf('Downloading segMap: %s\n', segMapList(tomoSequence(tomoNum)).name);
+               % fprintf('Downloading segMap: %s\n', segMapList(segMap_indeces(tomoNum)).name);
+               fprintf('Downloading Field_sample: %s\n', fieldList(tomoSequence(tomoNum)).name);
+               % fprintf('Downloading Field_sample: %s\n', fieldList(segMap_indeces(tomoNum)).name);
+               try
+                   cd(spath)
+                   cd(dateList(dateNum).name)
+                   cd(batchList(batchNum).name)
+                   cd('field_retrieval')
+                  
+                   load(tomoList(tomoSequence(tomoNum)).name);
+                   load(segMapList(tomoSequence(tomoNum)).name);
+                   % load(segMapList(segMap_indeces(tomoNum)).name)
+                   load(fieldList(tomoSequence(tomoNum)).name)
+                   % load(fieldList(segMap_indeces(tomoNum)).name)
+                   Reconimg=real(Reconimg);
+                   phaseMap = retPhase(:,:,16);
+
+                   qData=[];
+                   fileNameData=[];
+                   sampleInd=1;
+
+                   for zz=1:size(Reconimg,3)
+                       temp=conv2(squeeze(Reconimg(:,:,zz)),fspecial('disk',0.7),'same');
+                       temp=temp(3:end-2,3:end-2);
+                       temp=padarray(temp,[2 2],n_m);
+                       Reconimg(:,:,zz)=temp;
+                   end
+
+                   n_s=n_m+0.04;
+
+                   
+
+                   %% build-up process
+                   %    implementing Otsu for level identification
+                   level = multithresh(Reconimg,1);
+
+                   
+                   for cellNum=1:max(segMapPresentUpdated(:))
+                       % fprintf('cellNum: %d\n', cellNum); % Debug print
+                       if tomoSequence(tomoNum)>tomoSequence(2)
+                           try
+                               iter=1;
+                               level2=level;
+                               qDataTemp=quantification3D(Reconimg,level2,cellNum);
+                               qDataTemp(12)=cellNum;
+                               qDataTemp(13)=level2;
+                               %qDataTemp(14)=iter;
+                               
+                               %qDataTemp2(15) = sum(sum(sum((Reconimg - n_m)))) * (res3^2 * res4) / RII;
+                               analysisData{tomoSequence(tomoNum)}(cellNum,:)=qDataTemp;
+                           catch e
+                           end
+                       elseif tomoSequence(tomoNum)<tomoSequence(1)
+                           try
+                               centroid=regionprops((segMapPresentUpdated == cellNum),'Centroid');
+                               centroid=centroid(1);
+                               centroid=(centroid.Centroid);
+
+                                % position tracker of single cells, with respect to FOV change 
+                                if tomoSequence(tomoNum) == 29
+                                    fprintf('dangerous\n');
+                                end
+                                 for sampleNum=1:size(analysisData{tomoSequence(1)},1)
+                                    posDiff=(centroid(2:-1:1)+positionList(tomoSequence(tomoNum),:))-(analysisData{tomoSequence(tomoNum-1)}(:,8:-1:7)+positionList(tomoSequence(tomoNum-1),:));
+                                    [indVal,ind]=min((posDiff(:,1).^2+posDiff(:,2).^2));
+                                end
+
+                                %% level calculator involved %%                                
+                                %iter = 1;
+                                %qDataTemp2 = quantification3D(Reconimg,level,cellNum);
+                                %[level2,iter]=levelCalculator_adjusted(Reconimg,cellNum,ind,level, tomoNum);
+
+                                
+                                level2 = level;
+                                qDataTemp = quantification3D(Reconimg, level2, cellNum);
+                                qDataTemp(12)=cellNum;
+                                qDataTemp(13)=level2;
+                                %qDataTemp(14)=iter;
+                                analysisData{tomoSequence(tomoNum)}(cellNum,:)=qDataTemp;
+                           catch e
+                               % fprintf('Error: %s\n', e.message);
+                           end
+                       end
+
+                    end
+                   %%
+
+
+                    cd(spath)
+                    cd(dateList(dateNum).name)
+                    cd(batchList(batchNum).name)
+                    cd('field_retrieval')
+                    figure('WindowState','maximized');
+                    subplot(121),imagesc(max(Reconimg,[],3),[n_m-0.005 n_s]),axis image,axis off,colormap('jet')
+                    subplot(122),imagesc(max(segMapPresentUpdated,[],3),[0 max(segMapPresentUpdated(:))]),axis image,axis off,colormap('jet')
+                    %print('-dpng',strcat('Segmentation_',tomoList((tomoSequence(tomoNum))).name,'_YOLO_v4.png'));
+                    %save(strcat('Segmentation_',tomoList((tomoSequence(tomoNum))).name,'_YOLO_v4.mat'),'segMapPresentUpdated');
+                    fprintf('Here should be the image\n'); % Debug print
+                    close all
+                catch e
+                end
+            end
         end
     end
 end
