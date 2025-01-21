@@ -1,4 +1,4 @@
-![data_analysis_pipelines](https://github.com/user-attachments/assets/5e283225-502b-443a-b097-f0ed6dfea0aa)# ODT_pipeline
+
 The pipeline consists of 7 steps:
 1) Tomogram aquisition (experiment)
 2) Field retrieval
